@@ -1,0 +1,58 @@
+Bootstrap: docker
+From: python:3.10-slim
+
+%environment
+    export PYTHONUNBUFFERED=1
+    export HF_HOME=/tmp/hf
+    export TRANSFORMERS_OFFLINE=1
+    export HF_DATASETS_OFFLINE=1
+    export PATH=/usr/local/bin:$PATH
+
+%post
+    # 安裝最小系統工具
+    apt-get update && apt-get install -y --no-install-recommends \
+        git \
+        ca-certificates \
+        && rm -rf /var/lib/apt/lists/*
+
+    # 設定工作目錄
+    mkdir /app
+    cd /app
+
+    # 假設在 build 時已將預下載的 wheels 目錄放在 build context 中
+    # 並將 requirements.txt 放在當前目錄
+    # （build 命令示例：apptainer build finetune.sif Apptainer.def --fakeroot）
+    # wheels 目錄需包含所有 requirements.txt 中套件的 .whl（包含 torch==2.3.1 +cu124 或相容版本、bitsandbytes 等 CUDA 特定 wheel）
+
+    # 離線安裝 Python 套件
+    pip install --no-index --find-links=/wheels -r requirements.txt
+
+    # 複製訓練腳本（假設 build 時已將 finetune.py 放在 build context）
+    cp /finetune.py /app/finetune.py
+
+%files
+    # 如果 wheels 和 finetune.py 在 build context，請使用 %files 複製
+    # wheels/ /wheels/
+    # finetune.py /app/finetune.py
+
+%runscript
+    exec bash "$@"
+
+%labels
+    Author YourName
+    Description Offline Unsloth finetuning environment for CUDA 12.4
+
+%help
+    此 Apptainer 容器提供完全離線的 Unsloth finetuning 環境。
+    使用方式（需 GPU node）：
+    apptainer run --nv \
+        --bind /path/to/models:/models \
+        --bind /path/to/datasets:/datasets \
+        --bind /path/to/outputs:/outputs \
+        finetune.sif python /app/finetune.py
+
+    注意：
+    - 模型需預先放在 host 的 /path/to/models/gpt-oss-20b
+    - 資料集 parquet 需預先放在 host 的 /path/to/datasets/Multilingual-Thinking/data/
+    - 輸出會寫入 host 的 /path/to/outputs
+    - wheels 目錄需包含相容 CUDA 12.4 的 torch、bitsandbytes、unsloth 等 wheel（可從有網路環境預先下載）
