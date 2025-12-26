@@ -5,48 +5,62 @@ from datasets import load_dataset
 from trl import SFTConfig, SFTTrainer
 from unsloth.chat_templates import standardize_sharegpt, train_on_responses_only
 
-# 載入模型 (從本地路徑，離線)
+# ---- 基本設定 ----
+MODEL_PATH = "/models/gpt-oss-20b"
+DATASET_PATH = "/datasets/Multilingual-Thinking"
+OUTPUT_DIR = "/outputs"
+
 max_seq_length = 1024
 dtype = None
+
+# ---- 載入模型（完全離線）----
 model, tokenizer = FastLanguageModel.from_pretrained(
-    model_name="/models/gpt-oss-20b",  # 修改為本地路徑
-    dtype=dtype,
+    model_name=MODEL_PATH,
     max_seq_length=max_seq_length,
+    dtype=dtype,
     load_in_4bit=True,
-    full_finetuning=False,
+    local_files_only=True,
 )
 
-# 添加 LoRA adapters
+# ---- LoRA 設定 ----
 model = FastLanguageModel.get_peft_model(
     model,
     r=8,
-    target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
+    target_modules=[
+        "q_proj", "k_proj", "v_proj",
+        "o_proj", "gate_proj", "up_proj", "down_proj"
+    ],
     lora_alpha=16,
     lora_dropout=0,
     bias="none",
     use_gradient_checkpointing="unsloth",
     random_state=3407,
-    use_rslora=False,
-    loftq_config=None,
 )
 
-# 載入資料集 (從本地路徑，離線)
+# ---- Dataset（parquet，離線）----
 dataset = load_dataset(
-    "/datasets/Multilingual-Thinking",  # 修改為本地路徑
-    data_files={"train": "data/train-00000-of-00001.parquet"},
-    split="train"
+    "parquet",
+    data_files=f"{DATASET_PATH}/data/*.parquet",
+    split="train",
+    cache_dir="/tmp/hf_cache",
 )
-
-# 格式化資料集
-def formatting_prompts_func(examples):
-    convos = examples["messages"]
-    texts = [tokenizer.apply_chat_template(convo, tokenize=False, add_generation_prompt=False) for convo in convos]
-    return {"text": texts}
 
 dataset = standardize_sharegpt(dataset)
+
+def formatting_prompts_func(examples):
+    texts = [
+        tokenizer.apply_chat_template(
+            convo,
+            tokenize=False,
+            add_generation_prompt=False
+        )
+        for convo in examples["messages"]
+    ]
+    return {"text": texts}
+
 dataset = dataset.map(formatting_prompts_func, batched=True)
 
-# Trainer 設定
+# ---- Trainer ----
 trainer = SFTTrainer(
     model=model,
     tokenizer=tokenizer,
@@ -54,22 +68,18 @@ trainer = SFTTrainer(
     args=SFTConfig(
         per_device_train_batch_size=1,
         gradient_accumulation_steps=4,
-        warmup_steps=5,
-        max_steps=30,  # 調整為您的需求
+        max_steps=30,
         learning_rate=2e-4,
         logging_steps=1,
-        optim="adamw_8bit",
-        weight_decay=0.001,
-        lr_scheduler_type="linear",
-        seed=3407,
-        output_dir="outputs",
+        output_dir=OUTPUT_DIR,
         report_to="none",
     ),
 )
 
-# 只訓練回應部分
-gpt_oss_kwargs = dict(instruction_part="<|start|>user<|message|>", response_part="<|start|>assistant<|channel|>final<|message|>")
-trainer = train_on_responses_only(trainer, **gpt_oss_kwargs)
+trainer = train_on_responses_only(
+    trainer,
+    instruction_part="<|start|>user<|message|>",
+    response_part="<|start|>assistant<|channel|>final<|message|>",
+)
 
-# 開始訓練
 trainer.train()
