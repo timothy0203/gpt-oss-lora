@@ -1,58 +1,77 @@
 Bootstrap: docker
-From: python:3.10-slim
-
-%environment
-    export PYTHONUNBUFFERED=1
-    export HF_HOME=/tmp/hf
-    export TRANSFORMERS_OFFLINE=1
-    export HF_DATASETS_OFFLINE=1
-    export PATH=/usr/local/bin:$PATH
-
-%post
-    # 安裝最小系統工具
-    apt-get update && apt-get install -y --no-install-recommends \
-        git \
-        ca-certificates \
-        && rm -rf /var/lib/apt/lists/*
-
-    # 設定工作目錄
-    mkdir /app
-    cd /app
-
-    # 假設在 build 時已將預下載的 wheels 目錄放在 build context 中
-    # 並將 requirements.txt 放在當前目錄
-    # （build 命令示例：apptainer build finetune.sif Apptainer.def --fakeroot）
-    # wheels 目錄需包含所有 requirements.txt 中套件的 .whl（包含 torch==2.3.1 +cu124 或相容版本、bitsandbytes 等 CUDA 特定 wheel）
-
-    # 離線安裝 Python 套件
-    pip install --no-index --find-links=/wheels -r requirements.txt
-
-    # 複製訓練腳本（假設 build 時已將 finetune.py 放在 build context）
-    cp /finetune.py /app/finetune.py
-
-%files
-    # 如果 wheels 和 finetune.py 在 build context，請使用 %files 複製
-    # wheels/ /wheels/
-    # finetune.py /app/finetune.py
-
-%runscript
-    exec bash "$@"
+From: rockylinux:8.8
 
 %labels
-    Author YourName
-    Description Offline Unsloth finetuning environment for CUDA 12.4
+    Author YourCompany
+    CUDA torch-cu124
+    Purpose gpt-oss-20b-lora-sft
 
-%help
-    此 Apptainer 容器提供完全離線的 Unsloth finetuning 環境。
-    使用方式（需 GPU node）：
-    apptainer run --nv \
-        --bind /path/to/models:/models \
-        --bind /path/to/datasets:/datasets \
-        --bind /path/to/outputs:/outputs \
-        finetune.sif python /app/finetune.py
+%environment
+    export LANG=C.UTF-8
+    export LC_ALL=C.UTF-8
+    export PYTHONUNBUFFERED=1
+    export HF_HOME=/workspace/hf
+    export TRANSFORMERS_CACHE=/workspace/hf
+    export CUDA_VISIBLE_DEVICES=all
 
-    注意：
-    - 模型需預先放在 host 的 /path/to/models/gpt-oss-20b
-    - 資料集 parquet 需預先放在 host 的 /path/to/datasets/Multilingual-Thinking/data/
-    - 輸出會寫入 host 的 /path/to/outputs
-    - wheels 目錄需包含相容 CUDA 12.4 的 torch、bitsandbytes、unsloth 等 wheel（可從有網路環境預先下載）
+%post
+    set -e
+
+    echo "=== System packages ==="
+    dnf install -y \
+        python39 \
+        python39-devel \
+        git \
+        gcc \
+        gcc-c++ \
+        make \
+        wget \
+        which \
+        numactl-libs \
+        && dnf clean all
+
+    ln -sf /usr/bin/python3.9 /usr/bin/python
+    ln -sf /usr/bin/pip3.9 /usr/bin/pip
+
+    echo "=== Upgrade pip ==="
+    pip install --no-cache-dir --upgrade pip setuptools wheel
+
+    echo "=== Install PyTorch (CUDA 12.4) ==="
+    pip install --no-cache-dir \
+        torch==2.2.2+cu124 \
+        torchvision==0.17.2+cu124 \
+        torchaudio==2.2.2+cu124 \
+        --index-url https://download.pytorch.org/whl/cu124
+
+    echo "=== Verify torch ==="
+    python - << 'EOF'
+import torch
+print("torch:", torch.__version__)
+print("cuda available:", torch.cuda.is_available())
+EOF
+
+    echo "=== Install LLM stack ==="
+    pip install --no-cache-dir \
+        transformers==4.41.2 \
+        datasets \
+        accelerate \
+        peft \
+        trl==0.9.6 \
+        sentencepiece \
+        protobuf \
+        einops
+
+    echo "=== bitsandbytes ==="
+    pip install --no-cache-dir bitsandbytes==0.43.1
+
+    echo "=== unsloth ==="
+    pip install --no-cache-dir unsloth
+
+    echo "=== Sanity import test ==="
+    python - << 'EOF'
+import torch, transformers, trl, bitsandbytes, unsloth
+print("ALL IMPORT OK")
+EOF
+
+%runscript
+    exec python "$@"
