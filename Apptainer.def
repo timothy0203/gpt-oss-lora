@@ -19,8 +19,8 @@ From: rockylinux:8.8
 
     echo "=== System packages ==="
     dnf install -y \
-        python39 \
-        python39-devel \
+        python311 \
+        python311-devel \
         git \
         gcc \
         gcc-c++ \
@@ -28,49 +28,68 @@ From: rockylinux:8.8
         wget \
         which \
         numactl-libs \
+        epel-release \
         && dnf clean all
 
-    ln -sf /usr/bin/python3.9 /usr/bin/python
-    ln -sf /usr/bin/pip3.9 /usr/bin/pip
+    # 啟用 PowerTools（部分依賴可能需要）
+    dnf config-manager --set-enabled powertools
+
+    ln -sf /usr/bin/python3.11 /usr/bin/python
+    ln -sf /usr/bin/pip3.11 /usr/bin/pip
 
     echo "=== Upgrade pip ==="
-    pip install --no-cache-dir --upgrade pip setuptools wheel
+    pip install --no-cache-dir --upgrade pip setuptools wheel \
+        --trusted-host pypi.org \
+        --trusted-host pypi.python.org \
+        --trusted-host files.pythonhosted.org
 
-    echo "=== Install PyTorch (CUDA 12.4) ==="
+    echo "=== Install PyTorch (CUDA 12.4 - latest) ==="
     pip install --no-cache-dir \
-        torch==2.2.2+cu124 \
-        torchvision==0.17.2+cu124 \
-        torchaudio==2.2.2+cu124 \
-        --index-url https://download.pytorch.org/whl/cu124
+        torch torchvision torchaudio \
+        --index-url https://download.pytorch.org/whl/cu124 \
+        --trusted-host download.pytorch.org
 
     echo "=== Verify torch ==="
     python - << 'EOF'
 import torch
 print("torch:", torch.__version__)
-print("cuda available:", torch.cuda.is_available())
+print("CUDA available:", torch.cuda.is_available())
+print("GPU name:", torch.cuda.get_device_name(0) if torch.cuda.is_available() else "No GPU")
 EOF
 
     echo "=== Install LLM stack ==="
     pip install --no-cache-dir \
-        transformers==4.41.2 \
+        transformers \
         datasets \
         accelerate \
         peft \
-        trl==0.9.6 \
+        trl \
         sentencepiece \
         protobuf \
-        einops
+        einops \
+        --trusted-host pypi.org \
+        --trusted-host pypi.python.org \
+        --trusted-host files.pythonhosted.org
 
     echo "=== bitsandbytes ==="
-    pip install --no-cache-dir bitsandbytes==0.43.1
+    pip install --no-cache-dir bitsandbytes \
+        --trusted-host pypi.org \
+        --trusted-host pypi.python.org \
+        --trusted-host files.pythonhosted.org
 
-    echo "=== unsloth ==="
-    pip install --no-cache-dir unsloth
+    echo "=== unsloth (latest from GitHub) ==="
+    pip install --no-cache-dir "unsloth[cu124-torch260] @ git+https://github.com/unslothai/unsloth.git" \
+        --trusted-host github.com
 
     echo "=== Sanity import test ==="
     python - << 'EOF'
-import torch, transformers, trl, bitsandbytes, unsloth
-print("ALL IMPORT OK")
+import torch
+from unsloth import FastLanguageModel
+import transformers, trl, bitsandbytes, datasets, accelerate, peft
+print("torch:", torch.__version__)
+print("CUDA available:", torch.cuda.is_available())
+print("GPU name:", torch.cuda.get_device_name(0) if torch.cuda.is_available() else "No GPU")
+print("ALL IMPORT OK - Unsloth ready!")
 EOF
 
 %runscript
