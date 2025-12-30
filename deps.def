@@ -16,18 +16,11 @@ From: cuda_base.sif
     dnf -y update
     dnf -y install python39 python39-pip git gcc-c++ make wget bzip2 gzip
 
-    echo "[INFO] Upgrade pip..."
-    python3.9 -m pip install --upgrade pip setuptools wheel --no-cache-dir
-
-    echo "[INFO] Installing PyTorch + CUDA 12.2 compatible version..."
-    # 注意: 這裡使用本地 wheel 或已下載好的 whl，air-gapped 環境可替換成 wheel 檔路徑
+    echo "[INFO] Installing pip packages from local wheels..."
     pip install --no-index --find-links /workspace/wheels \
         torch==2.8.0+cu122 \
         torchvision==0.15.2+cu122 \
-        torchaudio==2.0.2+cu122
-
-    echo "[INFO] Installing other ML packages..."
-    pip install --no-index --find-links /workspace/wheels \
+        torchaudio==2.0.2+cu122 \
         transformers==4.56.2 \
         tokenizers==0.13.3 \
         bitsandbytes==0.41.0 \
