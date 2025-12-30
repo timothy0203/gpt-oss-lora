@@ -1,75 +1,97 @@
 import os
 import torch
-from unsloth import FastLanguageModel
-from datasets import load_dataset
-from trl import SFTConfig, SFTTrainer
-from unsloth.chat_templates import standardize_sharegpt, train_on_responses_only
-
-# 載入模型 (從本地路徑，離線)
-max_seq_length = 1024
-dtype = None
-model, tokenizer = FastLanguageModel.from_pretrained(
-    model_name="/models/gpt-oss-20b",  # 修改為本地路徑
-    dtype=dtype,
-    max_seq_length=max_seq_length,
-    load_in_4bit=True,
-    full_finetuning=False,
+from torch.utils.data import Dataset, DataLoader
+from transformers import (
+    AutoTokenizer,
+    AutoModelForCausalLM,
+    Trainer,
+    TrainingArguments,
 )
 
-# 添加 LoRA adapters
-model = FastLanguageModel.get_peft_model(
-    model,
-    r=8,
-    target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
-    lora_alpha=16,
-    lora_dropout=0,
-    bias="none",
-    use_gradient_checkpointing="unsloth",
-    random_state=3407,
-    use_rslora=False,
-    loftq_config=None,
+# ----------------------------
+# Config
+# ----------------------------
+MODEL_PATH = os.environ.get("MODEL_PATH", "./model")
+OUTPUT_DIR = "./output"
+MAX_LEN = 512
+BATCH_SIZE = 2
+EPOCHS = 1
+LR = 2e-5
+
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+print(f"[INFO] Using device: {DEVICE}")
+
+# ----------------------------
+# Dummy dataset (replace later)
+# ----------------------------
+class TextDataset(Dataset):
+    def __init__(self, texts, tokenizer):
+        self.encodings = tokenizer(
+            texts,
+            truncation=True,
+            padding="max_length",
+            max_length=MAX_LEN,
+        )
+
+    def __len__(self):
+        return len(self.encodings["input_ids"])
+
+    def __getitem__(self, idx):
+        return {
+            "input_ids": torch.tensor(self.encodings["input_ids"][idx]),
+            "attention_mask": torch.tensor(self.encodings["attention_mask"][idx]),
+            "labels": torch.tensor(self.encodings["input_ids"][idx]),
+        }
+
+# ----------------------------
+# Load model / tokenizer
+# ----------------------------
+print("[INFO] Loading tokenizer...")
+tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH, use_fast=True)
+if tokenizer.pad_token is None:
+    tokenizer.pad_token = tokenizer.eos_token
+
+print("[INFO] Loading model...")
+model = AutoModelForCausalLM.from_pretrained(
+    MODEL_PATH,
+    torch_dtype=torch.float16 if DEVICE == "cuda" else torch.float32,
+)
+model.to(DEVICE)
+
+# ----------------------------
+# Data
+# ----------------------------
+texts = [
+    "module adder(input a, input b, output sum);",
+    "always @(posedge clk) begin state <= next_state; end",
+]
+
+dataset = TextDataset(texts, tokenizer)
+
+# ----------------------------
+# Training
+# ----------------------------
+args = TrainingArguments(
+    output_dir=OUTPUT_DIR,
+    per_device_train_batch_size=BATCH_SIZE,
+    num_train_epochs=EPOCHS,
+    learning_rate=LR,
+    fp16=(DEVICE == "cuda"),
+    logging_steps=1,
+    save_steps=50,
+    save_total_limit=2,
+    report_to="none",
 )
 
-# 載入資料集 (從本地路徑，離線)
-dataset = load_dataset(
-    "/datasets/Multilingual-Thinking",  # 修改為本地路徑
-    data_files={"train": "data/train-00000-of-00001.parquet"},
-    split="train"
-)
-
-# 格式化資料集
-def formatting_prompts_func(examples):
-    convos = examples["messages"]
-    texts = [tokenizer.apply_chat_template(convo, tokenize=False, add_generation_prompt=False) for convo in convos]
-    return {"text": texts}
-
-dataset = standardize_sharegpt(dataset)
-dataset = dataset.map(formatting_prompts_func, batched=True)
-
-# Trainer 設定
-trainer = SFTTrainer(
+trainer = Trainer(
     model=model,
-    tokenizer=tokenizer,
+    args=args,
     train_dataset=dataset,
-    args=SFTConfig(
-        per_device_train_batch_size=1,
-        gradient_accumulation_steps=4,
-        warmup_steps=5,
-        max_steps=30,  # 調整為您的需求
-        learning_rate=2e-4,
-        logging_steps=1,
-        optim="adamw_8bit",
-        weight_decay=0.001,
-        lr_scheduler_type="linear",
-        seed=3407,
-        output_dir="outputs",
-        report_to="none",
-    ),
 )
 
-# 只訓練回應部分
-gpt_oss_kwargs = dict(instruction_part="<|start|>user<|message|>", response_part="<|start|>assistant<|channel|>final<|message|>")
-trainer = train_on_responses_only(trainer, **gpt_oss_kwargs)
-
-# 開始訓練
+print("[INFO] Start training...")
 trainer.train()
+
+print("[INFO] Training done. Saving model...")
+trainer.save_model(OUTPUT_DIR)
+tokenizer.save_pretrained(OUTPUT_DIR)
