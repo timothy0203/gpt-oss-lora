@@ -1,0 +1,43 @@
+Bootstrap: localimage
+From: cuda_base.sif
+
+%labels
+    Author YourName
+    Version 1.0
+    Description "deps image: torch+transformers+trl+bitsandbytes+unsloth"
+
+%environment
+    export LANG=C.UTF-8
+    export LC_ALL=C.UTF-8
+    export PATH=/usr/local/bin:$PATH
+
+%post
+    echo "[INFO] Updating system..."
+    dnf -y update
+    dnf -y install python39 python39-pip git gcc-c++ make wget bzip2 gzip
+
+    echo "[INFO] Upgrade pip..."
+    python3.9 -m pip install --upgrade pip setuptools wheel --no-cache-dir
+
+    echo "[INFO] Installing PyTorch + CUDA 12.2 compatible version..."
+    # 注意: 這裡使用本地 wheel 或已下載好的 whl，air-gapped 環境可替換成 wheel 檔路徑
+    pip install --no-index --find-links /workspace/wheels \
+        torch==2.8.0+cu122 \
+        torchvision==0.15.2+cu122 \
+        torchaudio==2.0.2+cu122
+
+    echo "[INFO] Installing other ML packages..."
+    pip install --no-index --find-links /workspace/wheels \
+        transformers==4.56.2 \
+        tokenizers==0.13.3 \
+        bitsandbytes==0.41.0 \
+        trl==0.22.2 \
+        unsloth==0.1.9 \
+        unsloth_zoo==0.1.5
+
+    echo "[INFO] Cleaning cache..."
+    rm -rf /root/.cache/pip
+
+%runscript
+    echo "This container provides deps for LoRA/PEFT finetuning"
+    exec /bin/bash "$@"
