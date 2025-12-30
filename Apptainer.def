@@ -6,32 +6,33 @@ From: nvidia/cuda:12.4.0-base-rockylinux8
     Version 1.0
 
 %post
-    # 更新系統
     dnf -y update && dnf clean all
-
-    # 安裝必要系統套件
     dnf install -y python39 python39-pip python39-devel gcc gcc-c++ git && dnf clean all
 
-    # 拷貝 wheel
-    mkdir /wheels
-    cp -r /host_wheels/* /wheels/
+    mkdir -p /wheels
+    cp -r /host_wheels/* /wheels/ || true   # 防止 cp 失敗中斷建置
 
-    # 建立 virtualenv
+    # 移除可能造成衝突的 xformers（CPU 環境用不到，且常損壞）
+    rm -f /wheels/xformers* /wheels/*xformers* 2>/dev/null || true
+
     python3.9 -m venv /opt/venv
     . /opt/venv/bin/activate
+    pip install --upgrade pip
 
-    # 安裝 wheel
-    pip install --no-index --find-links=/wheels \
-        torch-2.6.0+cu124-*.whl \
-        torchvision-0.21.0+cu124-*.whl \
-        torchaudio-2.6.0+cu124-*.whl \
-        unsloth-2025.12.9-py3-none-any.whl \
-        unsloth_zoo-2025.12.7-py3-none-any.whl \
-        trl-0.22.2-py3-none-any.whl \
-        accelerate-1.10.1-py3-none-any.whl \
-        peft-0.17.1-py3-none-any.whl \
-        bitsandbytes-0.48.2-py3-none-any.whl \
-        transformers-4.56.2-py3-none-any.whl
+    # 正確方式 1：直接安裝 wheel 檔案（最推薦，不會有版本衝突）
+    pip install --no-index /wheels/torch-2.6.0+cu124-cp39-cp39-linux_x86_64.whl
+    pip install --no-index /wheels/torchvision-0.21.0+cu124-cp39-cp39-linux_x86_64.whl
+    pip install --no-index /wheels/torchaudio-2.6.0+cu124-cp39-cp39-linux_x86_64.whl
+    pip install --no-index /wheels/transformers-4.56.2-py3-none-any.whl
+    pip install --no-index /wheels/unsloth-2025.12.9-py3-none-any.whl
+    pip install --no-index /wheels/unsloth_zoo-2025.12.7-py3-none-any.whl
+    pip install --no-index /wheels/trl-0.22.2-py3-none-any.whl
+    pip install --no-index /wheels/accelerate-1.10.1-py3-none-any.whl
+    pip install --no-index /wheels/peft-0.17.1-py3-none-any.whl
+    pip install --no-index /wheels/bitsandbytes-0.48.2-py3-none-any.whl
+
+%files
+    /home/vboxuser/host_wheels /wheels
 
 %environment
     export PATH=/opt/venv/bin:$PATH
