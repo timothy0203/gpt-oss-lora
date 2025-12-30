@@ -1,0 +1,23 @@
+Bootstrap: docker
+From: nvidia/cuda:12.4.1-cudnn9-runtime-rockylinux8
+
+%post
+    dnf -y update
+    dnf -y install \
+        python39 python39-devel \
+        gcc gcc-c++ make \
+        git wget \
+        openssl-devel \
+        libffi-devel \
+        cmake \
+        which \
+        && dnf clean all
+
+    ln -sf /usr/bin/python3.9 /usr/bin/python3
+    ln -sf /usr/bin/pip3.9 /usr/bin/pip3
+
+    python3 -m pip install --upgrade pip setuptools wheel
+
+%environment
+    export PATH=/usr/bin:$PATH
+    export PYTHONUNBUFFERED=1
